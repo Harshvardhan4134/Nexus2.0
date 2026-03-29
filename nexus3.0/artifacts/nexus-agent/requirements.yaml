@@ -1,0 +1,16 @@
+packages:
+  "framer-motion": "For premium smooth page transitions and step-by-step animations"
+  "lucide-react": "For crisp, modern icons across the UI"
+  "clsx": "Utility for constructing className strings conditionally"
+  "tailwind-merge": "Utility to merge tailwind classes without style conflicts"
+  "date-fns": "For elegant timestamp formatting in history and logs"
+
+images:
+  - path: "artifacts/nexus-agent/public/images/bg-mesh.png"
+    description: "A very dark, subtle abstract gradient mesh background. Deep blacks and very faint, low-opacity pulses of deep violet and indigo. Extremely minimal, looks like an expensive glass reflection."
+    aspect_ratio: "16:9"
+
+notes:
+  - Using @workspace/api-client-react for generated API hooks
+  - Relying on localStorage for API keys and settings to persist across sessions without user auth
+  - Utilizing Web Speech API for voice input functionality

@@ -1,0 +1,377 @@
+openapi: 3.1.0
+info:
+  title: Api
+  version: 0.1.0
+  description: Nexus Agent API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: agent
+    description: Agent operations
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /agent/models:
+    get:
+      operationId: getModels
+      tags: [agent]
+      summary: Get available models
+      description: Returns list of available AI models grouped by provider
+      responses:
+        "200":
+          description: Models list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelsResponse"
+
+  /agent/sessions:
+    get:
+      operationId: getSessions
+      tags: [agent]
+      summary: List agent sessions
+      responses:
+        "200":
+          description: Sessions list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionsResponse"
+
+  /agent/run:
+    post:
+      operationId: runAgent
+      tags: [agent]
+      summary: Start or resume an agent task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RunAgentRequest"
+      responses:
+        "200":
+          description: Session started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunAgentResponse"
+
+  /agent/sessions/{sessionId}:
+    get:
+      operationId: getSession
+      tags: [agent]
+      summary: Get session details
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionDetail"
+
+  /agent/sessions/{sessionId}/stop:
+    post:
+      operationId: stopSession
+      tags: [agent]
+      summary: Stop a running session
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session stopped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StopSessionResponse"
+
+  /agent/sessions/{sessionId}/input:
+    post:
+      operationId: sendInput
+      tags: [agent]
+      summary: Send user input to a waiting session
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserInputRequest"
+      responses:
+        "200":
+          description: Input accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserInputResponse"
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    ModelsResponse:
+      type: object
+      properties:
+        models:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelInfo"
+      required:
+        - models
+
+    ModelInfo:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        provider:
+          type: string
+        description:
+          type: string
+      required:
+        - id
+        - name
+        - provider
+
+    SessionsResponse:
+      type: object
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionSummary"
+      required:
+        - sessions
+
+    SessionSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        task:
+          type: string
+        status:
+          type: string
+          enum: [idle, running, waiting_for_input, waiting_for_user, completed, error, stopped]
+        createdAt:
+          type: string
+        model:
+          type: string
+        provider:
+          type: string
+        stepCount:
+          type: integer
+      required:
+        - id
+        - task
+        - status
+        - createdAt
+
+    RunAgentRequest:
+      type: object
+      properties:
+        task:
+          type: string
+        model:
+          type: string
+        provider:
+          type: string
+        apiKey:
+          type: string
+        openrouterModel:
+          type: string
+        mode:
+          type: string
+          enum: [auto, agent, chat]
+          default: auto
+        sessionId:
+          type: string
+        tinyfishKey:
+          type: string
+          description: TinyFish API key for primary browser control
+        kimiKey:
+          type: string
+          description: Kimi (Moonshot AI) API key for vision-based element targeting
+        browserMode:
+          type: string
+          enum: [tinyfish, playwright, auto]
+          default: auto
+          description: Browser control mode - auto tries TinyFish first, falls back to Playwright
+        useChromeExtension:
+          type: boolean
+          description: Run task in the user's Chrome via the Nexus extension (no Playwright). Set NEXUS_USE_CHROME_EXTENSION=1 on the API to default this on.
+      required:
+        - task
+
+    RunAgentResponse:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        status:
+          type: string
+        message:
+          type: string
+        extensionMode:
+          type: boolean
+          description: True when the session is executed by the Chrome extension, not Playwright
+      required:
+        - sessionId
+        - status
+
+    SessionDetail:
+      type: object
+      properties:
+        id:
+          type: string
+        task:
+          type: string
+        status:
+          type: string
+          enum: [idle, running, waiting_for_input, waiting_for_user, completed, error, stopped]
+        createdAt:
+          type: string
+        model:
+          type: string
+        provider:
+          type: string
+        stepCount:
+          type: integer
+        logs:
+          type: array
+          items:
+            $ref: "#/components/schemas/LogEntry"
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActionEntry"
+        extractedData:
+          type: object
+          additionalProperties: true
+        currentUrl:
+          type: string
+        inputPrompt:
+          type: string
+        chatResponse:
+          type: string
+        waitingForUser:
+          type: boolean
+        waitingMessage:
+          type: string
+        browserSurface:
+          type: string
+          enum: [headless, headed, cdp]
+          description: Where automation runs (for sign-in instructions)
+        extensionMode:
+          type: boolean
+          description: True when the task runs in real Chrome via the Nexus extension (no Playwright)
+      required:
+        - id
+        - task
+        - status
+        - createdAt
+
+    LogEntry:
+      type: object
+      properties:
+        timestamp:
+          type: string
+        level:
+          type: string
+          enum: [info, warn, error, debug]
+        message:
+          type: string
+      required:
+        - timestamp
+        - level
+        - message
+
+    ActionEntry:
+      type: object
+      properties:
+        timestamp:
+          type: string
+        action:
+          type: string
+        params:
+          type: object
+          additionalProperties: true
+        result:
+          type: string
+        status:
+          type: string
+          enum: [pending, success, error, skipped]
+      required:
+        - timestamp
+        - action
+        - status
+
+    StopSessionResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+      required:
+        - success
+        - message
+
+    UserInputRequest:
+      type: object
+      properties:
+        input:
+          type: string
+        confirmed:
+          type: boolean
+      required:
+        - input
+
+    UserInputResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+      required:
+        - success
+        - message
