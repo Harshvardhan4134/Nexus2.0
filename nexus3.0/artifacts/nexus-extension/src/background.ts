@@ -5,16 +5,27 @@
 
 import {
   BYOK_GROQ_STORAGE_KEY,
+  BYOK_OPENROUTER_MODEL_KEY,
+  BYOK_OPENROUTER_STORAGE_KEY,
   BYOK_STORAGE_KEY,
 } from "./application-profile";
 import { NEXUS_FILL_FORM_FULL_TASK } from "./extension-constants";
-import { generateEmailDraftWithGroq } from "./groq-email-draft";
+import { formalizeEmailDraftWithGroq, generateEmailDraftWithGroq } from "./groq-email-draft";
+import { generateJobApplyAssistantReply } from "./job-assist-groq";
+import { buildLlmConfigFromStored } from "./llm-provider";
 import {
   buildLinkedInSearchUrl,
   linkedInJobTaskNeedsSearchNavigation,
 } from "./linkedin-job-url";
 import { extractHttpUrl, shouldNavigateFromChatToUrl } from "./navigate-from-chat";
-import { isEmailIntent, isJobIntent } from "./task-intents";
+import {
+  buildFoodOrderUrl,
+  isEmailIntent,
+  isFoodOrderIntent,
+  isGmailFormalizeIntent,
+  isGmailMailSearchIntent,
+  isJobIntent,
+} from "./task-intents";
 
 function waitTabComplete(tabId: number): Promise<void> {
   return new Promise((resolve) => {
@@ -50,6 +61,19 @@ async function ensureTabForTask(
 
   if (isJobIntent(task) && linkedInJobTaskNeedsSearchNavigation(url, task)) {
     await chrome.tabs.update(tabId, { url: buildLinkedInSearchUrl(task) });
+    await waitTabComplete(tabId);
+    await delay(1200);
+  }
+
+  if ((isGmailMailSearchIntent(task) || isGmailFormalizeIntent(task)) && !onGmail) {
+    await chrome.tabs.update(tabId, { url: "https://mail.google.com/mail/u/0/" });
+    await waitTabComplete(tabId);
+    await delay(900);
+  }
+
+  const onFood = Boolean(urlForEnsure && /ubereats\.com|doordash\.com|grubhub\.com/i.test(urlForEnsure));
+  if (isFoodOrderIntent(task) && !onFood) {
+    await chrome.tabs.update(tabId, { url: buildFoodOrderUrl(task) });
     await waitTabComplete(tabId);
     await delay(1200);
   }
@@ -342,19 +366,20 @@ chrome.runtime.onMessage.addListener(
     if (msg?.type === "GENERATE_EMAIL_DRAFT") {
       void (async () => {
         try {
-          const stored = await chrome.storage.local.get([BYOK_GROQ_STORAGE_KEY, BYOK_STORAGE_KEY]);
-          const groq =
-            typeof stored[BYOK_GROQ_STORAGE_KEY] === "string" ? stored[BYOK_GROQ_STORAGE_KEY].trim() : "";
-          const legacy =
-            typeof stored[BYOK_STORAGE_KEY] === "string" ? stored[BYOK_STORAGE_KEY].trim() : "";
-          const apiKey = groq || legacy;
-          if (!apiKey) {
-            sendResponse({ ok: false, error: "no_groq_key" });
+          const stored = await chrome.storage.local.get([
+            BYOK_OPENROUTER_STORAGE_KEY,
+            BYOK_OPENROUTER_MODEL_KEY,
+            BYOK_GROQ_STORAGE_KEY,
+            BYOK_STORAGE_KEY,
+          ]);
+          const llm = buildLlmConfigFromStored(stored);
+          if (!llm) {
+            sendResponse({ ok: false, error: "no_llm_key" });
             return;
           }
           const subIn = typeof msg.subject === "string" ? msg.subject.trim() : "";
           const bodyIn = typeof msg.body === "string" ? msg.body.trim() : "";
-          const draft = await generateEmailDraftWithGroq(apiKey, {
+          const draft = await generateEmailDraftWithGroq(llm, {
             task: typeof msg.task === "string" ? msg.task : "",
             to: typeof msg.to === "string" ? msg.to : undefined,
             subject: subIn || undefined,
@@ -374,6 +399,92 @@ chrome.runtime.onMessage.addListener(
           });
         }
       })();
+      return true;
+    }
+
+    if (msg?.type === "JOB_ASSIST_REPLY") {
+      void (async () => {
+        try {
+          const stored = await chrome.storage.local.get([
+            BYOK_OPENROUTER_STORAGE_KEY,
+            BYOK_OPENROUTER_MODEL_KEY,
+            BYOK_GROQ_STORAGE_KEY,
+            BYOK_STORAGE_KEY,
+          ]);
+          const llm = buildLlmConfigFromStored(stored);
+          if (!llm) {
+            sendResponse({
+              ok: true,
+              text:
+                "Add an OpenRouter or Groq API key under API keys (BYOK) for tailored suggestions. Meanwhile: attach a resume with +, save your Application profile in the menu, open a job posting, then say “fill application form” so Nexus can fill visible fields (you submit yourself).",
+            });
+            return;
+          }
+          const task = typeof msg.task === "string" ? msg.task : "";
+          const hasResume = Boolean((msg as { hasResume?: boolean }).hasResume);
+          const hasProfile = Boolean((msg as { hasProfile?: boolean }).hasProfile);
+          const profileHint = typeof (msg as { profileHint?: string }).profileHint === "string"
+            ? (msg as { profileHint: string }).profileHint
+            : "";
+          const text = await generateJobApplyAssistantReply(llm, {
+            task,
+            hasResume,
+            hasProfile,
+            profileHint: profileHint.slice(0, 500),
+          });
+          sendResponse({ ok: true, text });
+        } catch (e: unknown) {
+          sendResponse({
+            ok: false,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      })();
+      return true;
+    }
+
+    if (msg?.type === "FORMALIZE_EMAIL_DRAFT") {
+      void (async () => {
+        try {
+          const stored = await chrome.storage.local.get([
+            BYOK_OPENROUTER_STORAGE_KEY,
+            BYOK_OPENROUTER_MODEL_KEY,
+            BYOK_GROQ_STORAGE_KEY,
+            BYOK_STORAGE_KEY,
+          ]);
+          const llm = buildLlmConfigFromStored(stored);
+          if (!llm) {
+            sendResponse({ ok: false, error: "no_llm_key" });
+            return;
+          }
+          const draft = await formalizeEmailDraftWithGroq(llm, {
+            subject: typeof msg.subject === "string" ? msg.subject : "",
+            body: typeof msg.body === "string" ? msg.body : "",
+            task: typeof msg.task === "string" ? msg.task : "",
+          });
+          if (!draft.subject?.trim() && !draft.body?.trim()) {
+            sendResponse({ ok: false, error: "empty_result" });
+            return;
+          }
+          sendResponse({ ok: true, subject: draft.subject.trim(), body: draft.body.trim() });
+        } catch (e: unknown) {
+          sendResponse({
+            ok: false,
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
+      })();
+      return true;
+    }
+
+    if (msg?.type === "TINYFISH_OPEN_URL") {
+      const url = (msg as { url?: string }).url;
+      if (typeof url === "string" && url.startsWith("http")) {
+        void chrome.tabs.create({ url, active: true });
+        sendResponse({ ok: true });
+      } else {
+        sendResponse({ ok: false, error: "invalid_url" });
+      }
       return true;
     }
 

@@ -14,9 +14,61 @@
 
 import type { Page } from "playwright";
 import * as lb from "./live-browser.js";
+import { runAutomation } from "./tinyfish.js";
 
 const autoSendEmail = process.env.NEXUS_AUTO_SEND_EMAIL !== "0";
 const autoLinkedInApply = process.env.NEXUS_AUTO_LINKEDIN_APPLY !== "0";
+
+// ─── AI Email Generation (OpenRouter) ─────────────────────────────────────────
+
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const OPENROUTER_DEFAULT_MODEL = "openai/gpt-4o-mini";
+
+interface AiEmailDraft { subject: string; body: string }
+
+async function generateEmailWithAI(task: string, to?: string): Promise<AiEmailDraft | null> {
+  const apiKey = process.env.OPENROUTER_API_KEY?.trim();
+  if (!apiKey) return null;
+
+  const model = process.env.OPENROUTER_MODEL?.trim() || OPENROUTER_DEFAULT_MODEL;
+  const system = `You compose professional emails. Reply ONLY with a JSON object with two keys: "subject" (one line) and "body" (plain text, use \\n for new lines).`;
+  const user = [
+    `Write an email for this request: ${task.trim()}`,
+    to ? `Recipient email: ${to}` : "",
+  ].filter(Boolean).join("\n");
+
+  try {
+    const res = await fetch(OPENROUTER_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://nexus-agent.local",
+        "X-Title": "Nexus Agent (API server)",
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: user },
+        ],
+        response_format: { type: "json_object" },
+        max_tokens: 1024,
+        temperature: 0.45,
+      }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+    const raw = data.choices?.[0]?.message?.content?.trim() ?? "";
+    const parsed = JSON.parse(raw) as { subject?: string; body?: string };
+    return {
+      subject: (parsed.subject ?? "").trim(),
+      body: (parsed.body ?? "").replace(/\\n/g, "\n").trim(),
+    };
+  } catch {
+    return null;
+  }
+}
 
 export interface TaskRunnerResult {
   success: boolean;
@@ -257,13 +309,53 @@ function isGmailAppUrl(url: string): boolean {
   return /mail\.google\.com\/mail\//.test(url);
 }
 
+async function fillGmailToField(
+  session: lb.LiveBrowserSession,
+  to: string,
+  log: (m: string) => void,
+): Promise<void> {
+  const page = session.page;
+  log(`Filling recipient: ${to}`);
+
+  const toSelectors = [
+    'textarea[name="to"]',
+    'input[name="to"]',
+    '[aria-label="To recipients"]',
+    '[aria-label*="To"]',
+    'input[aria-autocomplete="list"]',
+  ];
+
+  for (const sel of toSelectors) {
+    try {
+      const loc = page.locator(sel).first();
+      await loc.waitFor({ state: "visible", timeout: 3000 });
+      await loc.click({ timeout: 2000 });
+      await lb.wait(session, 150);
+      await page.keyboard.type(to, { delay: 35 });
+      await lb.wait(session, 600);
+      await page.keyboard.press("Enter");
+      await lb.wait(session, 600);
+      log(`Recipient entered via: ${sel}`);
+      return;
+    } catch {
+      /* try next selector */
+    }
+  }
+  // Fallback: click the To row by position
+  log("To selectors failed — typing via keyboard as last resort");
+  await page.keyboard.type(to, { delay: 35 });
+  await lb.wait(session, 500);
+  await page.keyboard.press("Enter");
+  await lb.wait(session, 400);
+}
+
 async function runEmail(
   session: lb.LiveBrowserSession,
   intent: TaskIntent,
   log: (m: string) => void,
   warn: (m: string) => void,
 ): Promise<TaskRunnerResult> {
-  const { to, subject, body } = intent.email ?? {};
+  let { to, subject, body } = intent.email ?? {};
   log("Opening Gmail...");
   await lb.navigate(session, GMAIL_INBOX_URL);
   await lb.wait(session, 3000);
@@ -294,6 +386,20 @@ async function runEmail(
     await lb.wait(session, 3000);
   }
 
+  // AI generation — fill in missing subject/body
+  const needsAi = !subject?.trim() || !body?.trim();
+  if (needsAi) {
+    log("Generating email content with AI (OpenRouter)…");
+    const draft = await generateEmailWithAI(intent.raw, to);
+    if (draft) {
+      if (!subject?.trim() && draft.subject) { subject = draft.subject; log(`AI subject: ${subject}`); }
+      if (!body?.trim() && draft.body) { body = draft.body; log("AI body generated."); }
+    } else {
+      warn("OpenRouter key not set or unavailable — using task text as email body.");
+      if (!body?.trim()) body = intent.raw;
+    }
+  }
+
   log("Opening Gmail compose window...");
 
   // Click Compose button
@@ -303,15 +409,11 @@ async function runEmail(
     await lb.navigate(session, "https://mail.google.com/mail/u/0/#compose");
     await lb.wait(session, 2000);
   }
-  await lb.wait(session, 1500);
+  await lb.wait(session, 1800);
 
-  // Fill recipient
+  // Fill recipient — click To field, type, press Enter to chip it
   if (to) {
-    log(`Filling recipient: ${to}`);
-    await lb.typeText(session, 'input[name="to"], textarea[name="to"], [aria-label="To recipients"]', to, "To field in Gmail compose");
-    await lb.wait(session, 500);
-    await lb.pressKey(session, "Tab");
-    await lb.wait(session, 400);
+    await fillGmailToField(session, to, log);
   } else {
     warn("No recipient specified. Please fill in the To field.");
     await lb.waitForUser(session, "Please fill in the recipient address and click Resume when ready");
@@ -320,16 +422,34 @@ async function runEmail(
   // Fill subject
   if (subject) {
     log(`Filling subject: ${subject}`);
-    await lb.typeText(session, 'input[name="subjectbox"], [aria-label="Subject"]', subject, "Subject field in Gmail compose");
+    const page = session.page;
+    try {
+      const subjectLoc = page.locator('input[name="subjectbox"], [aria-label*="Subject"]').first();
+      await subjectLoc.click({ timeout: 3000 });
+      await lb.wait(session, 100);
+      await subjectLoc.fill(subject, { timeout: 3000 });
+    } catch {
+      await lb.typeText(session, 'input[name="subjectbox"]', subject, "Subject field");
+    }
     await lb.wait(session, 400);
   }
 
   // Fill body
   if (body) {
     log("Typing email body...");
-    await lb.click(session, '[aria-label="Message Body"], .Am.Al.editable', "Email body area");
-    await lb.wait(session, 400);
-    await lb.typeAtFocus(session, body);
+    const page = session.page;
+    try {
+      const bodyLoc = page
+        .locator('[aria-label="Message Body"], .Am.Al.editable, [contenteditable="true"][g_editable]')
+        .first();
+      await bodyLoc.click({ timeout: 3000 });
+      await lb.wait(session, 300);
+      await page.keyboard.type(body, { delay: 18 });
+    } catch {
+      await lb.click(session, '[aria-label="Message Body"], .Am.Al.editable', "Email body area");
+      await lb.wait(session, 400);
+      await lb.typeAtFocus(session, body);
+    }
     await lb.wait(session, 500);
   }
 

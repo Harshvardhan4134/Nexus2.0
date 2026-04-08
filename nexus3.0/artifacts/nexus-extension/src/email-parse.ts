@@ -98,6 +98,25 @@ export function parseEmailParts(task: string): { to?: string; subject?: string; 
       .trim();
   }
 
+  // Chat-style: "… to x@y.com about tmrw meeting" (no colon after "about") — avoids LLM-only drafts.
+  if (!subject || !body) {
+    const looseAbout = working.match(/\s+about\s+(.+)$/is);
+    if (looseAbout) {
+      const tail = looseAbout[1].trim().replace(/\b(and\s+send|send\s+it|send\s+now)\s*$/i, "").trim();
+      if (tail.length >= 2) {
+        if (!body) body = tail;
+        if (!subject) {
+          const words = tail.split(/\s+/).filter(Boolean);
+          subject = words.slice(0, Math.min(8, words.length)).join(" ");
+          if (subject.length > 72) subject = `${subject.slice(0, 69)}…`;
+        }
+        if (body && /^about\s+/i.test(body.trim())) {
+          body = tail;
+        }
+      }
+    }
+  }
+
   if (body && subject) {
     const bn = body.toLowerCase();
     const sn = subject.toLowerCase();

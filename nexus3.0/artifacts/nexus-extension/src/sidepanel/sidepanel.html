@@ -310,6 +310,13 @@
         color: var(--err);
       }
 
+      .step-text {
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 260px;
+        overflow-y: auto;
+      }
+
       .task-step.done .step-text {
         color: #d4d4d8;
       }
@@ -448,6 +455,16 @@
         text-align: center;
         margin-top: 4px;
         min-height: 14px;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .spinner {
+        display: inline-block;
+        width: 11px; height: 11px;
+        border: 2px solid rgba(255,255,255,0.25);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+        flex-shrink: 0;
       }
 
       .drawer {
@@ -589,6 +606,173 @@
       .hidden {
         display: none !important;
       }
+
+      /* ── TinyFish credential strip (inline, shown on demand) ── */
+      .tf-cred-strip {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        padding: 8px 10px;
+        border-top: 1px solid var(--border);
+        background: var(--surface);
+        animation: fadeSlide 0.2s ease-out;
+      }
+
+      .tf-cred-strip input {
+        flex: 1;
+        padding: 6px 8px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--card);
+        color: var(--text);
+        font-size: 11px;
+        min-width: 0;
+      }
+
+      .tf-cred-retry {
+        padding: 6px 10px;
+        border-radius: 8px;
+        background: var(--accent);
+        border: none;
+        color: #fff;
+        font-size: 11px;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+
+      /* ── TinyFish live view section ── */
+      .tf-live-section {
+        margin: 12px 0;
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        overflow: hidden;
+        background: var(--surface);
+        animation: fadeSlide 0.3s ease-out;
+      }
+
+      .tf-live-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 12px;
+        background: var(--card);
+        border-bottom: 1px solid var(--border);
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--muted);
+      }
+
+      .tf-live-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--ok);
+        margin-right: 6px;
+        animation: pulseGlow 1.4s ease-in-out infinite;
+      }
+
+      .tf-live-dot.stopped {
+        background: var(--muted);
+        animation: none;
+      }
+
+      .tf-live-iframe {
+        width: 100%;
+        height: 200px;
+        border: none;
+        background: #111;
+        display: block;
+      }
+
+      .tf-live-placeholder {
+        height: 60px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        color: var(--muted);
+        padding: 12px;
+      }
+
+      .tf-live-logs {
+        max-height: 110px;
+        overflow-y: auto;
+        padding: 8px 12px;
+        border-top: 1px solid var(--border);
+        font-size: 10px;
+        color: #a1a1aa;
+        line-height: 1.6;
+      }
+
+      .tf-log-line {
+        padding: 1px 0;
+      }
+
+      .tf-log-line::before {
+        content: "›";
+        color: var(--accent-bright);
+        margin-right: 5px;
+      }
+
+      /* ── TinyFish result card ── */
+      .tf-result-card {
+        margin: 10px 0;
+        padding: 12px 14px;
+        border: 1px solid var(--ok);
+        border-radius: var(--radius);
+        background: rgba(34,197,94,0.06);
+        animation: fadeSlide 0.3s ease-out;
+      }
+
+      .tf-result-card.failed {
+        border-color: var(--err);
+        background: rgba(248,113,113,0.06);
+      }
+
+      .tf-result-title {
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--ok);
+        margin-bottom: 6px;
+      }
+
+      .tf-result-card.failed .tf-result-title {
+        color: var(--err);
+      }
+
+      .tf-result-url {
+        font-size: 10px;
+        color: var(--accent-bright);
+        word-break: break-all;
+        margin-bottom: 8px;
+      }
+
+      .tf-result-actions {
+        display: flex;
+        gap: 6px;
+      }
+
+      .tf-result-actions button {
+        padding: 6px 12px;
+        border-radius: 8px;
+        font-size: 11px;
+        cursor: pointer;
+        font-weight: 600;
+      }
+
+      .tf-btn-open {
+        background: var(--accent);
+        border: none;
+        color: #fff;
+      }
+
+      .tf-btn-copy {
+        background: transparent;
+        border: 1px solid var(--border);
+        color: var(--muted);
+      }
     </style>
   </head>
   <body>
@@ -615,19 +799,66 @@
       <h2>Settings</h2>
       <h3>API keys (BYOK)</h3>
       <p class="intro-text" style="margin-bottom: 10px">
-        Stored only in this browser. Groq can draft Gmail subject and message when you don’t write them; TinyFish is for managed cloud browser when your Nexus API uses it.
+        Stored only in this browser. Paste your key from
+        <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer">openrouter.ai/keys</a>.
+        After <strong>Save API keys</strong>, Gmail compose (AI subject/body) and “Make formal” use OpenRouter when the key below is set; otherwise they use Groq. TinyFish is separate (managed browser).
       </p>
-      <label for="byok-groq">Groq API key (LLM)</label>
+      <label for="byok-openrouter">OpenRouter API key (Gmail &amp; job assist — preferred)</label>
+      <input type="password" id="byok-openrouter" placeholder="sk-or-v1-…" autocomplete="off" spellcheck="false" />
+      <label for="byok-openrouter-model" style="margin-top: 8px">OpenRouter model id (optional)</label>
+      <input
+        type="text"
+        id="byok-openrouter-model"
+        placeholder="openai/gpt-4o-mini"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <label for="byok-groq" style="margin-top: 10px">Groq API key (LLM fallback)</label>
       <input type="password" id="byok-groq" placeholder="gsk_…" autocomplete="off" spellcheck="false" />
       <label for="byok-tinyfish" style="margin-top: 10px">TinyFish API key (browser)</label>
       <input type="password" id="byok-tinyfish" placeholder="sk-tinyfish-…" autocomplete="off" spellcheck="false" />
       <p class="intro-text" style="margin-top: 8px; margin-bottom: 8px; font-size: 11px">
-        Keys: <span style="color: var(--muted)">console.groq.com</span> ·
+        Keys: <span style="color: var(--muted)">openrouter.ai</span> ·
+        <span style="color: var(--muted)">console.groq.com</span> ·
         <span style="color: var(--muted)">tinyfish.io</span>
       </p>
       <button type="button" class="btn-primary" id="save-byok">Save API keys</button>
+      <p id="byok-llm-status" class="intro-text" style="margin-top: 10px; margin-bottom: 0; font-size: 11px"></p>
+
+      <h3 style="margin-top:18px">Site credentials</h3>
+      <p class="intro-text" style="margin-bottom:8px">
+        Saved here so TinyFish can log in automatically — no typing each time.
+        For Gmail with 2FA, use an <strong>App Password</strong>
+        (<a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noopener noreferrer">myaccount.google.com/apppasswords</a>)
+        to bypass 2FA completely.
+      </p>
+      <label for="saved-microsoft-email">Microsoft account email</label>
+      <input type="email" id="saved-microsoft-email" placeholder="you@outlook.com / you@org.com" autocomplete="off" spellcheck="false" />
+      <label for="saved-microsoft-password" style="margin-top:8px">Microsoft account password</label>
+      <input type="password" id="saved-microsoft-password" placeholder="••••••••" autocomplete="off" spellcheck="false" />
+      <label for="saved-gmail-email" style="margin-top:8px">Gmail email</label>
+      <input type="email" id="saved-gmail-email" placeholder="you@gmail.com" autocomplete="off" spellcheck="false" />
+      <label for="saved-gmail-password" style="margin-top:8px">Gmail password / App Password</label>
+      <input type="password" id="saved-gmail-password" placeholder="App password (no 2FA) or regular password" autocomplete="off" spellcheck="false" />
+      <label for="saved-linkedin-email" style="margin-top:8px">LinkedIn email</label>
+      <input type="email" id="saved-linkedin-email" placeholder="you@email.com" autocomplete="off" spellcheck="false" />
+      <label for="saved-linkedin-password" style="margin-top:8px">LinkedIn password</label>
+      <input type="password" id="saved-linkedin-password" placeholder="••••••••" autocomplete="off" spellcheck="false" />
+      <label for="saved-swiggy-email" style="margin-top:8px">Swiggy email</label>
+      <input type="email" id="saved-swiggy-email" placeholder="you@email.com" autocomplete="off" spellcheck="false" />
+      <label for="saved-swiggy-password" style="margin-top:8px">Swiggy password</label>
+      <input type="password" id="saved-swiggy-password" placeholder="••••••••" autocomplete="off" spellcheck="false" />
+      <label for="saved-zomato-email" style="margin-top:8px">Zomato email / phone</label>
+      <input type="email" id="saved-zomato-email" placeholder="you@email.com or 9876543210" autocomplete="off" spellcheck="false" />
+      <label for="saved-zomato-password" style="margin-top:8px">Zomato password</label>
+      <input type="password" id="saved-zomato-password" placeholder="••••••••" autocomplete="off" spellcheck="false" />
+      <button type="button" class="btn-primary" id="save-site-creds" style="margin-top:10px">Save credentials</button>
+      <p id="site-creds-status" class="intro-text" style="margin-top:6px;font-size:11px"></p>
 
       <h3>Application profile</h3>
+      <p class="intro-text" style="margin-bottom:8px">Fill manually or <strong>upload your resume</strong> (paperclip button) to auto-fill these fields.</p>
+      <button type="button" class="btn-ghost" id="autofill-from-resume" style="width:100%;margin-bottom:6px;font-size:11px">⬆ Auto-fill from uploaded resume</button>
+      <p id="autofill-status" class="intro-text" style="font-size:11px;min-height:14px;margin-bottom:8px;display:flex;align-items:center;gap:6px"></p>
       <details class="profile-block" open>
         <summary>Contact &amp; address</summary>
         <div class="field-row2">
@@ -695,14 +926,12 @@
     <main class="main-scroll">
       <div class="section-label">WHAT IS NEXUS?</div>
       <p class="intro-text">
-        Click the <strong>extension icon</strong> in the toolbar to open this side panel. Tasks run in the <strong>active tab</strong> next to it — Gmail, LinkedIn jobs, Workday-style
-        forms (from your profile + resume). Not on
-        <code style="color: var(--accent-bright)">chrome://</code> or the built-in New Tab page.
+        Your AI agent for the web. Paste any <strong>form URL</strong> (Google Forms, Typeform, Workday, Greenhouse…) and Nexus fills every field using your saved profile. Works on Gmail, LinkedIn jobs, Swiggy, and more.
       </p>
 
       <div class="preset-row">
         <button type="button" class="preset-card" data-preset="apply for a data analyst job from linkedin">
-          Apply for data analyst jobs — search, Easy Apply, skip already applied.
+          Apply for data analyst jobs — LinkedIn Easy Apply, auto-fills profile.
           <span class="preset-wand" aria-hidden="true">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <path d="M7.5 5.6L10 7 8.6 4.5 11 2 8.6 2 7 .5 5.6 2 3 2l1.5 2.5L2 7l2.5 1.5L2 11l2.5-1.5L7 11l-1.5-2.5zm12 6.5l2.5 1.5L21 14l-2.5 1.5L17 18l-1.5-2.5L13 14l2.5-1.5L17 10z" />
@@ -710,7 +939,7 @@
           </span>
         </button>
         <button type="button" class="preset-card" data-preset="fill application form">
-          Fill this application page (Workday / ATS) using your profile + resume.
+          Paste any form URL below — Nexus fills every field from your profile &amp; submits.
           <span class="preset-wand" aria-hidden="true">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <path d="M7.5 5.6L10 7 8.6 4.5 11 2 8.6 2 7 .5 5.6 2 3 2l1.5 2.5L2 7l2.5 1.5L2 11l2.5-1.5L7 11l-1.5-2.5zm12 6.5l2.5 1.5L21 14l-2.5 1.5L17 18l-1.5-2.5L13 14l2.5-1.5L17 10z" />
@@ -722,6 +951,9 @@
       <div class="quick-actions">
         <button type="button" class="pill" id="pill-fill">Fill application form</button>
         <button type="button" class="pill" id="pill-compose">Open Gmail compose flow</button>
+        <button type="button" class="pill" id="pill-formalize">Formalize Gmail draft (AI)</button>
+        <button type="button" class="pill" id="pill-swiggy">Order food on Swiggy</button>
+        <button type="button" class="pill" id="pill-zomato">Order food on Zomato</button>
       </div>
 
       <div class="task-card idle" id="task-card">
@@ -735,6 +967,51 @@
         </div>
         <ul class="task-steps" id="task-steps"></ul>
         <p class="disclaimer">Nexus may make mistakes — double-check forms, emails, and applications before submitting.</p>
+      </div>
+
+      <!-- TinyFish live view (shown while cloud run is active) -->
+      <div class="tf-live-section hidden" id="tf-live-section">
+        <div class="tf-live-header">
+          <div style="display:flex;align-items:center">
+            <span class="tf-live-dot" id="tf-live-dot"></span>
+            <span id="tf-live-status-text">TinyFish running…</span>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center">
+            <button type="button" id="tf-btn-fullview" class="hidden" style="font-size:10px;color:var(--ok);background:none;border:none;cursor:pointer;padding:0" title="Open live view in full tab">⛶ Full view</button>
+            <button type="button" id="tf-btn-creds-toggle" style="font-size:10px;color:var(--accent-bright);background:none;border:none;cursor:pointer;padding:0">Login needed?</button>
+            <button type="button" id="tf-btn-stop" style="font-size:10px;color:var(--err);background:none;border:none;cursor:pointer;padding:0" title="Stop TinyFish run">✕ Stop</button>
+          </div>
+        </div>
+        <div id="tf-iframe-wrap">
+          <div class="tf-live-placeholder" id="tf-live-placeholder">
+            <span class="spinner" style="width:14px;height:14px;margin-right:8px"></span>
+            Waiting for live view…
+          </div>
+          <iframe
+            id="tf-live-iframe"
+            class="tf-live-iframe hidden"
+            title="TinyFish live browser"
+            allow="clipboard-read; clipboard-write"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+          ></iframe>
+        </div>
+        <!-- Credential strip — shown when user taps "Login needed?" -->
+        <div class="tf-cred-strip hidden" id="tf-cred-strip">
+          <input type="email" id="tf-cred-email" placeholder="your@email.com" autocomplete="off" />
+          <input type="password" id="tf-cred-password" placeholder="Password" autocomplete="off" />
+          <button type="button" class="tf-cred-retry" id="tf-cred-retry">Retry with login</button>
+        </div>
+        <div class="tf-live-logs" id="tf-live-logs"></div>
+      </div>
+
+      <!-- TinyFish result card (shown when run completes) -->
+      <div class="tf-result-card hidden" id="tf-result-card">
+        <div class="tf-result-title" id="tf-result-title">Task completed</div>
+        <div class="tf-result-url hidden" id="tf-result-url"></div>
+        <div class="tf-result-actions" id="tf-result-actions">
+          <button type="button" class="tf-btn-open hidden" id="tf-btn-open">Open in new tab</button>
+          <button type="button" class="tf-btn-copy hidden" id="tf-btn-copy">Copy link</button>
+        </div>
       </div>
     </main>
 
@@ -761,7 +1038,7 @@
         </button>
       </div>
       <input type="file" id="file-resume" class="hidden" accept=".pdf,.doc,.docx,application/pdf" />
-      <div class="resume-badge" id="resume-status"></div>
+      <div class="resume-badge" id="resume-status" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"></div>
     </div>
 
     <script src="sidepanel.js"></script>

@@ -7,10 +7,18 @@ export const RESUME_STORAGE_KEY = "nexusResume";
 export const BYOK_STORAGE_KEY = "nexusByokApiKey";
 /** Groq API key for LLM calls when wired to the Nexus API. */
 export const BYOK_GROQ_STORAGE_KEY = "nexusByokGroqApiKey";
+/** OpenRouter API key — preferred for LLM tasks when set (intent / drafts / job assist). */
+export const BYOK_OPENROUTER_STORAGE_KEY = "nexusByokOpenrouterApiKey";
+/** Optional model id (e.g. openai/gpt-4o-mini). Empty = default in extension. */
+export const BYOK_OPENROUTER_MODEL_KEY = "nexusByokOpenrouterModel";
 /** TinyFish API key for managed cloud browser (when the backend uses TinyFish). */
 export const BYOK_TINYFISH_STORAGE_KEY = "nexusByokTinyfishApiKey";
 /** `{ ts: number; message: string; level?: string }[]` newest first. */
 export const ACTIVITY_LOG_KEY = "nexusActivityLogs";
+/** Saved site credentials for TinyFish auto-login `{ gmailEmail, gmailPassword, linkedinEmail, linkedinPassword }`. */
+export const SITE_CREDS_STORAGE_KEY = "nexusSiteCreds";
+/** Plain text extracted from the uploaded resume — used as profile data for form-filling. */
+export const RESUME_TEXT_STORAGE_KEY = "nexusResumeText";
 
 export type ApplicationProfile = {
   fullName: string;

@@ -47,6 +47,9 @@ function collectFieldHint(el: Element): string {
   add(h.getAttribute("aria-label"));
   add(h.getAttribute("data-automation-id"));
   add(h.getAttribute("data-test-id"));
+  add(h.getAttribute("data-testid"));
+  add(h.getAttribute("data-cy"));
+  add(h.getAttribute("data-qa"));
   add(h.getAttribute("autocomplete"));
   add(h.getAttribute("title"));
 
@@ -73,9 +76,17 @@ function collectFieldHint(el: Element): string {
   if (wrapLabel) add(wrapLabel.textContent ?? undefined);
 
   let walk: Element | null = h.parentElement;
-  for (let d = 0; d < 4 && walk; d++, walk = walk.parentElement) {
-    const ds = walk.getAttribute("data-automation-id");
-    if (ds) add(ds);
+  for (let d = 0; d < 8 && walk; d++, walk = walk.parentElement) {
+    add(walk.getAttribute("data-automation-id"));
+    add(walk.getAttribute("data-test-id"));
+    add(walk.getAttribute("data-testid"));
+    add(walk.getAttribute("data-qa"));
+    add(walk.getAttribute("aria-label"));
+    add(walk.getAttribute("role"));
+    if (walk.tagName === "FIELDSET") {
+      const leg = walk.querySelector("legend");
+      add(leg?.textContent ?? undefined);
+    }
   }
 
   return norm(parts.join(" "));
@@ -128,11 +139,44 @@ function scoreHint(hint: string, keywords: string[], weight: number): number {
   return s * weight;
 }
 
+function profileKeyFromIdOrName(id: string, name: string): ProfileKey | null {
+  const bag = norm(`${id} ${name}`);
+  if (!bag) return null;
+  if (/\b(e-?mail|emailaddr|mailaddress|contactemail|workemail)\b/.test(bag)) return "email";
+  if (/\b(fname|first-?name|firstname|givenname|given-?name|first_name)\b/.test(bag)) return "firstName";
+  if (/\b(lname|last-?name|lastname|surname|familyname|family-?name|last_name)\b/.test(bag)) return "lastName";
+  if (/\b(full-?name|fullname|applicantname)\b/.test(bag)) return "fullName";
+  if (/\b(phone|mobile|cell|telephone|tel|sms|contactnumber)\b/.test(bag)) return "phone";
+  if (/\b(address1|addr1|street|mailingaddr|line1)\b/.test(bag)) return "streetAddress";
+  if (/\b(city|town|locality)\b/.test(bag)) return "city";
+  if (/\b(state|province|region|county)\b/.test(bag)) return "state";
+  if (/\b(zip|postal|postcode|zipcode)\b/.test(bag)) return "zipCode";
+  if (/\b(country|nation)\b/.test(bag)) return "country";
+  if (/\b(linkedin|linked-in)\b/.test(bag)) return "linkedInUrl";
+  if (/\b(website|portfolio|github|url)\b/.test(bag)) return "portfolioUrl";
+  if (/\b(employer|company|organization|orgname)\b/.test(bag)) return "currentEmployer";
+  if (/\b(jobtitle|positiontitle|currenttitle)\b/.test(bag)) return "currentJobTitle";
+  return null;
+}
+
+function focusBeforeFill(el: HTMLElement): void {
+  try {
+    el.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
+      el.focus({ preventScroll: true });
+    } else {
+      el.focus({ preventScroll: true });
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 function bestSpecForHint(
   hint: string,
   opts?: { minScore?: number },
 ): { key: ProfileKey; score: number } | null {
-  const minScore = opts?.minScore ?? 6;
+  const minScore = opts?.minScore ?? 5;
   let best: { key: ProfileKey; score: number } | null = null;
   for (const spec of FIELD_SPECS) {
     const sc = scoreHint(hint, spec.keywords, spec.weight);
@@ -288,11 +332,16 @@ function fillFormInDocument(root: FormRoot, profile: ApplicationProfile): number
 
     if (el instanceof HTMLSelectElement) {
       const hint = collectFieldHint(el);
-      const best = bestSpecForHint(hint, { minScore: 8 });
+      let best = bestSpecForHint(hint, { minScore: 6 });
+      if (!best) {
+        const pk = profileKeyFromIdOrName(el.id, el.getAttribute("name") ?? "");
+        if (pk) best = { key: pk, score: 6 };
+      }
       if (!best) continue;
       const val = profileValue(merged, best.key);
       if (!val) continue;
       if (el.value.trim().length > 1) continue;
+      focusBeforeFill(el);
       if (fillSelect(el, val)) filled++;
       continue;
     }
@@ -305,13 +354,18 @@ function fillFormInDocument(root: FormRoot, profile: ApplicationProfile): number
         let valAc = profileValue(merged, acKeyTa);
         if (acKeyTa === "portfolioUrl" && !valAc) valAc = profileValue(merged, "linkedInUrl");
         if (valAc) {
+          focusBeforeFill(el);
           setReactFriendlyValue(el, valAc);
           filled++;
           continue;
         }
       }
       const hint = collectFieldHint(el);
-      const best = bestSpecForHint(hint);
+      let best = bestSpecForHint(hint);
+      if (!best) {
+        const pk = profileKeyFromIdOrName(el.id, el.getAttribute("name") ?? "");
+        if (pk) best = { key: pk, score: 5 };
+      }
       if (!best) continue;
       let val = profileValue(merged, best.key);
       if (!val && best.key === "fullName") {
@@ -320,6 +374,7 @@ function fillFormInDocument(root: FormRoot, profile: ApplicationProfile): number
           [merged.firstName, merged.lastName].filter(Boolean).join(" ");
       }
       if (!val) continue;
+      focusBeforeFill(el);
       setReactFriendlyValue(el, val);
       filled++;
       continue;
@@ -350,6 +405,7 @@ function fillFormInDocument(root: FormRoot, profile: ApplicationProfile): number
       let val = profileValue(merged, acKey);
       if (acKey === "portfolioUrl" && !val) val = profileValue(merged, "linkedInUrl");
       if (val) {
+        focusBeforeFill(input);
         setReactFriendlyValue(input, val);
         filled++;
         continue;
@@ -359,6 +415,7 @@ function fillFormInDocument(root: FormRoot, profile: ApplicationProfile): number
     if (type === "email") {
       const em = profileValue(merged, "email");
       if (em) {
+        focusBeforeFill(input);
         setReactFriendlyValue(input, em);
         filled++;
       }
@@ -369,6 +426,7 @@ function fillFormInDocument(root: FormRoot, profile: ApplicationProfile): number
       const po = profileValue(merged, "portfolioUrl");
       const u = li || po;
       if (u) {
+        focusBeforeFill(input);
         setReactFriendlyValue(input, u);
         filled++;
       }
@@ -377,6 +435,7 @@ function fillFormInDocument(root: FormRoot, profile: ApplicationProfile): number
     if (type === "tel") {
       const ph = profileValue(merged, "phone");
       if (ph) {
+        focusBeforeFill(input);
         setReactFriendlyValue(input, ph);
         filled++;
       }
@@ -384,7 +443,11 @@ function fillFormInDocument(root: FormRoot, profile: ApplicationProfile): number
     }
 
     const hint = collectFieldHint(input);
-    const best = bestSpecForHint(hint);
+    let best = bestSpecForHint(hint);
+    if (!best) {
+      const pk = profileKeyFromIdOrName(input.id, input.getAttribute("name") ?? "");
+      if (pk) best = { key: pk, score: 5 };
+    }
     if (!best) continue;
 
     let val = profileValue(merged, best.key);
@@ -395,6 +458,7 @@ function fillFormInDocument(root: FormRoot, profile: ApplicationProfile): number
     }
     if (!val) continue;
 
+    focusBeforeFill(input);
     setReactFriendlyValue(input, val);
     filled++;
   }
@@ -405,7 +469,11 @@ function fillFormInDocument(root: FormRoot, profile: ApplicationProfile): number
     if (el.querySelector(":scope > [contenteditable='true']")) continue;
     if ((el.textContent ?? "").trim().length > 2) continue;
     const hint = collectFieldHint(el);
-    const best = bestSpecForHint(hint);
+    let best = bestSpecForHint(hint);
+    if (!best) {
+      const pk = profileKeyFromIdOrName(el.id, el.getAttribute("name") ?? "");
+      if (pk) best = { key: pk, score: 5 };
+    }
     if (!best) continue;
     let val = profileValue(merged, best.key);
     if (!val && best.key === "fullName") {
@@ -414,7 +482,7 @@ function fillFormInDocument(root: FormRoot, profile: ApplicationProfile): number
         [merged.firstName, merged.lastName].filter(Boolean).join(" ");
     }
     if (!val) continue;
-    el.focus();
+    focusBeforeFill(el);
     el.textContent = val;
     try {
       el.dispatchEvent(
@@ -435,7 +503,11 @@ function fillFormInDocument(root: FormRoot, profile: ApplicationProfile): number
     const t = (el.textContent ?? "").trim();
     if (t.length > 2) continue;
     const hint = collectFieldHint(el);
-    const best = bestSpecForHint(hint);
+    let best = bestSpecForHint(hint);
+    if (!best) {
+      const pk = profileKeyFromIdOrName(el.id, el.getAttribute("name") ?? "");
+      if (pk) best = { key: pk, score: 5 };
+    }
     if (!best) continue;
     let val = profileValue(merged, best.key);
     if (!val && best.key === "fullName") {
@@ -444,7 +516,7 @@ function fillFormInDocument(root: FormRoot, profile: ApplicationProfile): number
         [merged.firstName, merged.lastName].filter(Boolean).join(" ");
     }
     if (!val) continue;
-    el.focus();
+    focusBeforeFill(el);
     el.textContent = val;
     pushInputEvent(el, val);
     filled++;
@@ -555,11 +627,16 @@ export async function fillApplicationFormOnPage(): Promise<string> {
     return "Save your Application profile in the popup (name / email) or attach a resume (+) before filling forms.";
   }
 
-  await scrollTreeForLazyContent(document, window);
-  await waitMs(250);
+  await waitMs(200);
+  let n = fillTree(document, profile);
+  let rCount = resumeFile ? attachResumeTree(document, resumeFile) : 0;
 
-  const n = fillTree(document, profile);
-  const rCount = resumeFile ? attachResumeTree(document, resumeFile) : 0;
+  if (n === 0 && rCount === 0) {
+    await scrollTreeForLazyContent(document, window);
+    await waitMs(280);
+    n = fillTree(document, profile);
+    rCount = resumeFile ? attachResumeTree(document, resumeFile) : 0;
+  }
 
   if (n === 0 && rCount === 0) {
     return "No fields matched. Try: click Apply / start the application first, confirm your Application profile has name & email, or say “fill application form” again after the form loads. Embedded apply iframes from another domain cannot be filled by the extension.";
@@ -768,29 +845,34 @@ export async function fillApplicationFormFullOnPage(): Promise<string> {
     return "Save your Application profile (name / email) or attach a resume (+) before filling forms.";
   }
 
-  await waitMs(1200);
-  await scrollTreeForLazyContent(document, window);
-  await waitMs(350);
+  await waitMs(900);
 
   let opened = await clickEntryApplyIfPresent();
-  if (opened) await waitMs(2800);
+  if (opened) await waitMs(2600);
 
   let n = fillTree(document, profile);
   let rCount = resumeFile ? attachResumeTree(document, resumeFile) : 0;
 
   if (n === 0 && rCount === 0) {
     await scrollTreeForLazyContent(document, window);
-    await waitMs(500);
+    await waitMs(400);
     n = fillTree(document, profile);
     rCount = resumeFile ? attachResumeTree(document, resumeFile) : 0;
   }
 
   if (n === 0 && rCount === 0) {
-    await waitMs(2200);
     opened = (await clickEntryApplyIfPresent()) || opened;
-    if (opened) await waitMs(2800);
+    if (opened) await waitMs(2600);
     await scrollTreeForLazyContent(document, window);
-    await waitMs(400);
+    await waitMs(450);
+    n = fillTree(document, profile);
+    rCount = resumeFile ? attachResumeTree(document, resumeFile) : 0;
+  }
+
+  if (n === 0 && rCount === 0) {
+    await waitMs(1200);
+    await scrollTreeForLazyContent(document, window);
+    await waitMs(350);
     n = fillTree(document, profile);
     rCount = resumeFile ? attachResumeTree(document, resumeFile) : 0;
   }

@@ -1,304 +1,176 @@
 /**
- * TinyFish Browser Control Service
+ * TinyFish Web Agent — AI-powered browser automation.
  *
- * TinyFish provides a managed browser control API. It handles DOM-based
- * interactions (navigate, click, type, extract) without needing a local browser.
+ * Real API base: https://agent.tinyfish.ai
+ * Docs:         https://docs.tinyfish.ai
  *
- * API: https://api.tinyfish.io
- * Docs: https://tinyfish.io/docs
+ * Key endpoints:
+ *   POST /v1/automation/run-sse  — stream an AI automation with natural language goal
+ *   POST /v1/automation/run      — synchronous (blocks until done)
+ *   POST /v1/browser             — create a raw CDP cloud browser session
  */
+
+const TINYFISH_BASE = "https://agent.tinyfish.ai";
 
 export interface TinyFishConfig {
   apiKey: string;
-  baseUrl?: string;
 }
 
-export interface TinyFishSession {
-  sessionId: string;
-  browserUrl?: string;
-}
-
-export interface PageState {
-  url: string;
-  title: string;
-  html?: string;
-  text?: string;
-  screenshot?: string;
-  isSparseDom: boolean;
-}
-
-export interface ActionResult {
-  success: boolean;
+export interface TinyFishRunResult {
+  status: "COMPLETED" | "FAILED" | "CANCELLED";
+  result?: Record<string, unknown> | null;
   error?: string;
-  pageState?: PageState;
-  extractedData?: Record<string, unknown>;
+  streamingUrl?: string;
+  runId?: string;
 }
 
-const TINYFISH_BASE = "https://api.tinyfish.io";
+export interface TinyFishBrowserSession {
+  sessionId: string;
+  cdpUrl: string;
+  baseUrl: string;
+}
 
 /**
- * Create a new TinyFish browser session.
+ * Run an AI automation synchronously and wait for the result.
+ * Use for short tasks (< 60s). Pass `onProgress` for live log lines.
  */
-export async function createSession(config: TinyFishConfig): Promise<TinyFishSession> {
-  const res = await fetch(`${config.baseUrl ?? TINYFISH_BASE}/v1/sessions`, {
+export async function runAutomation(
+  config: TinyFishConfig,
+  opts: {
+    url: string;
+    goal: string;
+    browserProfile?: "lite" | "stealth";
+    useVault?: boolean;
+    onProgress?: (msg: string) => void;
+    onStreamingUrl?: (url: string) => void;
+  }
+): Promise<TinyFishRunResult> {
+  const { url, goal, browserProfile = "stealth", useVault = false, onProgress, onStreamingUrl } = opts;
+
+  const res = await fetch(`${TINYFISH_BASE}/v1/automation/run-sse`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "X-API-Key": config.apiKey,
     },
-    body: JSON.stringify({ options: { headless: true, timeout: 30000 } }),
+    body: JSON.stringify({
+      url,
+      goal,
+      browser_profile: browserProfile,
+      use_vault: useVault,
+    }),
   });
 
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`TinyFish create session failed ${res.status}: ${err}`);
+    const err = await res.text().catch(() => res.statusText);
+    throw new Error(`TinyFish automation failed ${res.status}: ${err}`);
   }
 
-  return (await res.json()) as TinyFishSession;
+  // Parse SSE stream
+  const reader = res.body?.getReader();
+  if (!reader) throw new Error("TinyFish: no response body");
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let streamingUrl: string | undefined;
+  let runId: string | undefined;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      if (!line.startsWith("data:")) continue;
+      const json = line.slice(5).trim();
+      if (!json) continue;
+
+      try {
+        const event = JSON.parse(json) as {
+          type: string;
+          run_id?: string;
+          purpose?: string;
+          streaming_url?: string;
+          status?: string;
+          result?: Record<string, unknown> | null;
+          error?: string;
+        };
+
+        if (event.run_id) runId = event.run_id;
+
+        if (event.type === "STREAMING_URL" && event.streaming_url) {
+          streamingUrl = event.streaming_url;
+          onStreamingUrl?.(streamingUrl);
+          onProgress?.(`TinyFish live view: ${streamingUrl}`);
+        }
+
+        if (event.type === "PROGRESS" && event.purpose) {
+          onProgress?.(event.purpose);
+        }
+
+        if (event.type === "COMPLETE") {
+          return {
+            status: (event.status as TinyFishRunResult["status"]) ?? "COMPLETED",
+            result: event.result ?? null,
+            error: event.error,
+            streamingUrl,
+            runId,
+          };
+        }
+      } catch {
+        /* skip malformed SSE line */
+      }
+    }
+  }
+
+  return { status: "FAILED", error: "Stream ended without COMPLETE event", streamingUrl, runId };
 }
 
 /**
- * Navigate to a URL and return the resulting page state.
+ * Create a raw TinyFish cloud browser session.
+ * Returns a CDP WebSocket URL you can pass to Playwright's connectOverCDP().
  */
-export async function navigate(
-  sessionId: string,
-  url: string,
-  config: TinyFishConfig
-): Promise<PageState> {
-  const res = await fetch(
-    `${config.baseUrl ?? TINYFISH_BASE}/v1/sessions/${sessionId}/navigate`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": config.apiKey,
-      },
-      body: JSON.stringify({ url, waitFor: "networkidle" }),
-    }
-  );
+export async function createBrowserSession(
+  config: TinyFishConfig,
+  opts?: { url?: string }
+): Promise<TinyFishBrowserSession> {
+  const res = await fetch(`${TINYFISH_BASE}/v1/browser`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-API-Key": config.apiKey,
+    },
+    body: JSON.stringify(opts?.url ? { url: opts.url } : {}),
+  });
 
   if (!res.ok) {
-    throw new Error(`TinyFish navigate failed ${res.status}`);
+    const err = await res.text().catch(() => res.statusText);
+    throw new Error(`TinyFish create browser session failed ${res.status}: ${err}`);
   }
 
   const data = (await res.json()) as {
-    url: string;
-    title: string;
-    html?: string;
-    text?: string;
-    screenshot?: string;
+    session_id: string;
+    cdp_url: string;
+    base_url: string;
   };
 
   return {
-    url: data.url,
-    title: data.title,
-    html: data.html,
-    text: data.text,
-    screenshot: data.screenshot,
-    isSparseDom: isSparseDom(data.html ?? ""),
+    sessionId: data.session_id,
+    cdpUrl: data.cdp_url,
+    baseUrl: data.base_url,
   };
-}
-
-/**
- * Click an element using a CSS selector.
- */
-export async function clickElement(
-  sessionId: string,
-  selector: string,
-  config: TinyFishConfig
-): Promise<ActionResult> {
-  const res = await fetch(
-    `${config.baseUrl ?? TINYFISH_BASE}/v1/sessions/${sessionId}/click`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": config.apiKey,
-      },
-      body: JSON.stringify({ selector }),
-    }
-  );
-
-  if (!res.ok) {
-    const text = await res.text();
-    return { success: false, error: `Click failed (${res.status}): ${text}` };
-  }
-
-  return { success: true };
-}
-
-/**
- * Click at specific pixel coordinates (used after Kimi vision identifies target).
- */
-export async function clickAtCoordinates(
-  sessionId: string,
-  x: number,
-  y: number,
-  config: TinyFishConfig
-): Promise<ActionResult> {
-  const res = await fetch(
-    `${config.baseUrl ?? TINYFISH_BASE}/v1/sessions/${sessionId}/click`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": config.apiKey,
-      },
-      body: JSON.stringify({ coordinates: { x, y } }),
-    }
-  );
-
-  if (!res.ok) {
-    const text = await res.text();
-    return { success: false, error: `Click at coordinates failed (${res.status}): ${text}` };
-  }
-
-  return { success: true };
-}
-
-/**
- * Type text into a focused input.
- */
-export async function typeText(
-  sessionId: string,
-  selector: string,
-  text: string,
-  config: TinyFishConfig
-): Promise<ActionResult> {
-  const res = await fetch(
-    `${config.baseUrl ?? TINYFISH_BASE}/v1/sessions/${sessionId}/type`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": config.apiKey,
-      },
-      body: JSON.stringify({ selector, text }),
-    }
-  );
-
-  if (!res.ok) {
-    const t = await res.text();
-    return { success: false, error: `Type failed (${res.status}): ${t}` };
-  }
-
-  return { success: true };
-}
-
-/**
- * Type at specific pixel coordinates (vision-guided).
- */
-export async function typeAtCoordinates(
-  sessionId: string,
-  x: number,
-  y: number,
-  text: string,
-  config: TinyFishConfig
-): Promise<ActionResult> {
-  const res = await fetch(
-    `${config.baseUrl ?? TINYFISH_BASE}/v1/sessions/${sessionId}/type`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Key": config.apiKey,
-      },
-      body: JSON.stringify({ coordinates: { x, y }, text }),
-    }
-  );
-
-  if (!res.ok) {
-    const t = await res.text();
-    return { success: false, error: `Type at coordinates failed (${res.status}): ${t}` };
-  }
-
-  return { success: true };
-}
-
-/**
- * Capture a screenshot of the current page.
- */
-export async function captureScreenshot(
-  sessionId: string,
-  config: TinyFishConfig
-): Promise<string | null> {
-  const res = await fetch(
-    `${config.baseUrl ?? TINYFISH_BASE}/v1/sessions/${sessionId}/screenshot`,
-    {
-      method: "GET",
-      headers: { "X-API-Key": config.apiKey },
-    }
-  );
-
-  if (!res.ok) return null;
-
-  const data = (await res.json()) as { base64?: string; data?: string };
-  return data.base64 ?? data.data ?? null;
-}
-
-/**
- * Get current page state including HTML, text content, and screenshot.
- */
-export async function getPageState(
-  sessionId: string,
-  config: TinyFishConfig
-): Promise<PageState> {
-  const res = await fetch(
-    `${config.baseUrl ?? TINYFISH_BASE}/v1/sessions/${sessionId}/page`,
-    {
-      method: "GET",
-      headers: { "X-API-Key": config.apiKey },
-    }
-  );
-
-  if (!res.ok) throw new Error(`TinyFish getPageState failed ${res.status}`);
-
-  const data = (await res.json()) as {
-    url: string;
-    title: string;
-    html?: string;
-    text?: string;
-    screenshot?: string;
-  };
-
-  return {
-    url: data.url,
-    title: data.title,
-    html: data.html,
-    text: data.text,
-    screenshot: data.screenshot,
-    isSparseDom: isSparseDom(data.html ?? ""),
-  };
-}
-
-/**
- * Close/terminate a TinyFish session.
- */
-export async function closeSession(
-  sessionId: string,
-  config: TinyFishConfig
-): Promise<void> {
-  await fetch(
-    `${config.baseUrl ?? TINYFISH_BASE}/v1/sessions/${sessionId}`,
-    {
-      method: "DELETE",
-      headers: { "X-API-Key": config.apiKey },
-    }
-  );
 }
 
 /**
  * Determine if the DOM is sparse (SPA shell with little real content).
- * Triggers vision fallback when true.
  */
 export function isSparseDom(html: string): boolean {
   if (!html || html.length < 500) return true;
-
   const textContent = html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
   const wordCount = textContent.split(" ").filter((w) => w.length > 2).length;
-
-  const hasInteractiveElements =
-    /<(button|input|textarea|select|a\s)[^>]*>/i.test(html);
-
+  const hasInteractiveElements = /<(button|input|textarea|select|a\s)[^>]*>/i.test(html);
   return wordCount < 30 || !hasInteractiveElements;
 }
